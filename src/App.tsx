@@ -55,6 +55,7 @@ type SavedDungeon = {
 
 const MIN_SIZE = 1
 const MAX_SIZE = 12
+const EXPORT_TILE_SIZE = 512
 
 function createRandom(seed: number) {
   let value = seed || 1
@@ -92,6 +93,15 @@ function rotatePoint(x: number, y: number, degrees: number) {
     x: clampPercent(centeredX * cos - centeredY * sin + 0.5),
     y: clampPercent(centeredX * sin + centeredY * cos + 0.5),
   }
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error(`Unable to load image: ${src}`))
+    image.src = src
+  })
 }
 
 function buildTiles(size: Size, seed: number): Tile[] {
@@ -246,6 +256,7 @@ function App() {
     () => initialDungeon.marker,
   )
   const [dragPosition, setDragPosition] = useState<DragPosition | null>(null)
+  const [isExporting, setIsExporting] = useState(false)
   const isDraggingMarker = useRef(false)
 
   useEffect(() => {
@@ -284,6 +295,7 @@ function App() {
       const tile = tiles.find((currentTile) => currentTile.id === tileId)
 
       if (!tileButton || !tileId || !tile) {
+        setMarker(null)
         return
       }
 
@@ -387,6 +399,79 @@ function App() {
     })
   }
 
+  async function exportDungeonPng() {
+    setIsExporting(true)
+
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = size.width * EXPORT_TILE_SIZE
+      canvas.height = size.height * EXPORT_TILE_SIZE
+
+      const context = canvas.getContext('2d')
+
+      if (!context) {
+        return
+      }
+
+      context.imageSmoothingEnabled = false
+      context.fillStyle = '#e8e1d3'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+
+      const loadedImages = await Promise.all(
+        tiles.map((tile) => loadImage(tile.src)),
+      )
+
+      tiles.forEach((tile, index) => {
+        const column = index % size.width
+        const row = Math.floor(index / size.width)
+        const x = column * EXPORT_TILE_SIZE
+        const y = row * EXPORT_TILE_SIZE
+
+        context.save()
+        context.translate(x + EXPORT_TILE_SIZE / 2, y + EXPORT_TILE_SIZE / 2)
+        context.rotate((tile.rotation * Math.PI) / 180)
+        context.drawImage(
+          loadedImages[index],
+          -EXPORT_TILE_SIZE / 2,
+          -EXPORT_TILE_SIZE / 2,
+          EXPORT_TILE_SIZE,
+          EXPORT_TILE_SIZE,
+        )
+
+        if (marker?.tileId === tile.id) {
+          const markerRadius = Math.max(8, Math.min(18, EXPORT_TILE_SIZE * 0.035))
+          const markerX = marker.x * EXPORT_TILE_SIZE - EXPORT_TILE_SIZE / 2
+          const markerY = marker.y * EXPORT_TILE_SIZE - EXPORT_TILE_SIZE / 2
+
+          context.beginPath()
+          context.arc(markerX, markerY, markerRadius, 0, Math.PI * 2)
+          context.fillStyle = '#7b2ff2'
+          context.fill()
+          context.lineWidth = Math.max(3, markerRadius * 0.25)
+          context.strokeStyle = '#ffffff'
+          context.stroke()
+        }
+
+        context.restore()
+      })
+
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          return
+        }
+
+        const objectUrl = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = objectUrl
+        link.download = 'dynamic-geomorph-dungeon.png'
+        link.click()
+        URL.revokeObjectURL(objectUrl)
+      }, 'image/png')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="control-panel" aria-labelledby="app-title">
@@ -415,6 +500,14 @@ function App() {
           </label>
           <button type="button" onClick={regenerate}>
             Generate
+          </button>
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={isExporting}
+            onClick={() => void exportDungeonPng()}
+          >
+            {isExporting ? 'Saving...' : 'Save PNG'}
           </button>
         </div>
 
