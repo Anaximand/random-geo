@@ -129,46 +129,6 @@
   cursor: grabbing;
 }
 
-.emoji-panel {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.emoji-palette {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-}
-
-.emoji-source {
-  min-width: 0;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(54, 73, 71, 0.18);
-  border-radius: 7px;
-  background: rgba(248, 247, 242, 0.9);
-  font-size: 21px;
-  line-height: 1;
-  cursor: grab;
-}
-
-.emoji-source:hover {
-  border-color: rgba(182, 83, 55, 0.45);
-  background: #fff;
-}
-
-.emoji-source:active {
-  cursor: grabbing;
-}
-
 .zoom-controls {
   display: grid;
   grid-template-columns: 42px 1fr 42px;
@@ -394,10 +354,7 @@
   z-index: 2;
   translate: -50% -50%;
   cursor: grab;
-  transition:
-    left 160ms ease,
-    top 160ms ease,
-    transform 120ms ease;
+  transition: transform 120ms ease;
 }
 
 .marker-on-tile:hover {
@@ -408,39 +365,6 @@
   position: fixed;
   z-index: 20;
   translate: -50% -50%;
-  pointer-events: none;
-}
-
-.emoji-marker {
-  position: absolute;
-  z-index: 3;
-  translate: -50% -50%;
-  display: grid;
-  place-items: center;
-  min-width: 22px;
-  min-height: 22px;
-  border-radius: 999px;
-  font-size: 20px;
-  line-height: 1;
-  cursor: grab;
-  filter: drop-shadow(0 2px 3px rgba(28, 39, 37, 0.35));
-  transition:
-    left 160ms ease,
-    top 160ms ease,
-    transform 120ms ease;
-}
-
-.emoji-marker:hover {
-  transform: scale(1.12);
-}
-
-.emoji-marker:active {
-  cursor: grabbing;
-}
-
-.emoji-floating {
-  position: fixed;
-  z-index: 20;
   pointer-events: none;
 }
 
