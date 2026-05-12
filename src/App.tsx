@@ -123,10 +123,6 @@ function markerDisplayPoint(marker: Marker, tile: Tile) {
   return rotatePoint(marker.x, marker.y, tile.rotation)
 }
 
-function normalizeRotation(value: number) {
-  return ((value % 360) + 360) % 360
-}
-
 function loadImage(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image()
@@ -191,7 +187,7 @@ function encodeDungeon(
     h: size.height,
     t: tiles.map((tile) => [
       tile.assetIndex,
-      normalizeRotation(tile.rotation),
+      ((tile.rotation % 360) + 360) % 360,
       tile.id,
     ]),
     m: marker ? [marker.tileId, marker.x, marker.y] : null,
@@ -236,7 +232,6 @@ function decodeDungeon(
       return null
     }
 
-    const tileIdMap = new Map<string, string>()
     const tiles = parsed.t.map((savedTile, index) => {
       if (!Array.isArray(savedTile)) {
         throw new Error('Invalid tile')
@@ -254,29 +249,22 @@ function decodeDungeon(
         throw new Error('Invalid tile')
       }
 
-      const safeId = `saved-${index}`
-      tileIdMap.set(id, safeId)
-
       return {
-        id: safeId,
+        id: id || `saved-${index}`,
         assetIndex,
         src: centers[assetIndex],
-        rotation: normalizeRotation(rotation),
+        rotation,
       }
     })
 
-    const savedMarkerTileId =
-      Array.isArray(parsed.m) && typeof parsed.m[0] === 'string'
-        ? tileIdMap.get(parsed.m[0])
-        : null
-
     const marker =
       Array.isArray(parsed.m) &&
-      savedMarkerTileId &&
+      typeof parsed.m[0] === 'string' &&
       Number.isFinite(parsed.m[1]) &&
-      Number.isFinite(parsed.m[2])
+      Number.isFinite(parsed.m[2]) &&
+      tiles.some((tile) => tile.id === parsed.m?.[0])
         ? {
-            tileId: savedMarkerTileId,
+            tileId: parsed.m[0],
             x: clampPercent(parsed.m[1]),
             y: clampPercent(parsed.m[2]),
           }
@@ -285,19 +273,17 @@ function decodeDungeon(
     const emojiMarkers =
       Array.isArray(parsed.e) && parsed.v === 2
         ? parsed.e
-            .map((savedEmoji, index): EmojiMarker | null => {
+            .map((savedEmoji): EmojiMarker | null => {
               if (!Array.isArray(savedEmoji)) {
                 return null
               }
 
               const [id, emoji, tileId, x, y] = savedEmoji
-              const safeTileId =
-                typeof tileId === 'string' ? tileIdMap.get(tileId) : undefined
 
               if (
                 typeof id !== 'string' ||
                 typeof emoji !== 'string' ||
-                !safeTileId ||
+                typeof tileId !== 'string' ||
                 !Number.isFinite(x) ||
                 !Number.isFinite(y)
               ) {
@@ -305,15 +291,19 @@ function decodeDungeon(
               }
 
               return {
-                id: `saved-emoji-${index}`,
+                id,
                 emoji,
-                tileId: safeTileId,
+                tileId,
                 x: clampPercent(x),
                 y: clampPercent(y),
               }
             })
             .filter((emojiMarker): emojiMarker is EmojiMarker => {
-              return Boolean(emojiMarker)
+              if (!emojiMarker) {
+                return false
+              }
+
+              return tiles.some((tile) => tile.id === emojiMarker.tileId)
             })
         : []
 
