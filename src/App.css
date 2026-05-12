@@ -409,7 +409,6 @@
   z-index: 20;
   translate: -50% -50%;
   pointer-events: none;
-  transition: none;
 }
 
 .emoji-marker {
@@ -443,7 +442,6 @@
   position: fixed;
   z-index: 20;
   pointer-events: none;
-  transition: none;
 }
 
 .site-footer {
