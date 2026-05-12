@@ -37,10 +37,20 @@ type Marker = {
   y: number
 }
 
-type DragPosition = {
+type EmojiMarker = Marker & {
+  id: string
+  emoji: string
+}
+
+type DragPositionBase = {
   x: number
   y: number
 }
+
+type DragPosition =
+  | (DragPositionBase & { kind: 'party' })
+  | (DragPositionBase & { kind: 'emoji-source'; emoji: string })
+  | (DragPositionBase & { kind: 'emoji-existing'; emoji: string; id: string })
 
 type PanStart = {
   pointerId: number
@@ -55,11 +65,12 @@ type ViewTransitionDocument = Document & {
 }
 
 type SavedDungeon = {
-  v: 1
+  v: 1 | 2
   w: number
   h: number
   t: Array<[number, number, string]>
   m: [string, number, number] | null
+  e?: Array<[string, string, string, number, number]>
 }
 
 const MIN_SIZE = 1
@@ -68,6 +79,7 @@ const EXPORT_TILE_SIZE = 512
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 4
 const ZOOM_STEP = 0.1
+const EMOJI_OPTIONS = ['💀', '🗝️', '💰', '🔥', '⚔️', '🛡️', '🧪', '📜']
 
 function createRandom(seed: number) {
   let value = seed || 1
@@ -107,6 +119,10 @@ function rotatePoint(x: number, y: number, degrees: number) {
   }
 }
 
+function markerDisplayPoint(marker: Marker, tile: Tile) {
+  return rotatePoint(marker.x, marker.y, tile.rotation)
+}
+
 function loadImage(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image()
@@ -136,9 +152,37 @@ function buildTiles(size: Size, seed: number): Tile[] {
   return tiles
 }
 
-function encodeDungeon(size: Size, tiles: Tile[], marker: Marker | null) {
+function encodeBase64Url(value: string) {
+  const bytes = new TextEncoder().encode(value)
+  let binary = ''
+
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
+}
+
+function decodeBase64Url(value: string) {
+  const normalized = value.replaceAll('-', '+').replaceAll('_', '/')
+  const padded = normalized.padEnd(
+    normalized.length + ((4 - (normalized.length % 4)) % 4),
+    '=',
+  )
+  const binary = atob(padded)
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+
+  return new TextDecoder().decode(bytes)
+}
+
+function encodeDungeon(
+  size: Size,
+  tiles: Tile[],
+  marker: Marker | null,
+  emojiMarkers: EmojiMarker[],
+) {
   const savedDungeon: SavedDungeon = {
-    v: 1,
+    v: 2,
     w: size.width,
     h: size.height,
     t: tiles.map((tile) => [
@@ -147,26 +191,31 @@ function encodeDungeon(size: Size, tiles: Tile[], marker: Marker | null) {
       tile.id,
     ]),
     m: marker ? [marker.tileId, marker.x, marker.y] : null,
+    e: emojiMarkers.map((emojiMarker) => [
+      emojiMarker.id,
+      emojiMarker.emoji,
+      emojiMarker.tileId,
+      emojiMarker.x,
+      emojiMarker.y,
+    ]),
   }
-  const json = JSON.stringify(savedDungeon)
-  const encoded = btoa(json)
 
-  return encoded.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
+  return encodeBase64Url(JSON.stringify(savedDungeon))
 }
 
 function decodeDungeon(
   value: string,
-): { size: Size; tiles: Tile[]; marker: Marker | null } | null {
+): {
+  size: Size
+  tiles: Tile[]
+  marker: Marker | null
+  emojiMarkers: EmojiMarker[]
+} | null {
   try {
-    const normalized = value.replaceAll('-', '+').replaceAll('_', '/')
-    const padded = normalized.padEnd(
-      normalized.length + ((4 - (normalized.length % 4)) % 4),
-      '=',
-    )
-    const parsed = JSON.parse(atob(padded)) as Partial<SavedDungeon>
+    const parsed = JSON.parse(decodeBase64Url(value)) as Partial<SavedDungeon>
 
     if (
-      parsed.v !== 1 ||
+      (parsed.v !== 1 && parsed.v !== 2) ||
       !Number.isInteger(parsed.w) ||
       !Number.isInteger(parsed.h) ||
       !Array.isArray(parsed.t)
@@ -221,7 +270,44 @@ function decodeDungeon(
           }
         : null
 
-    return { size, tiles, marker }
+    const emojiMarkers =
+      Array.isArray(parsed.e) && parsed.v === 2
+        ? parsed.e
+            .map((savedEmoji): EmojiMarker | null => {
+              if (!Array.isArray(savedEmoji)) {
+                return null
+              }
+
+              const [id, emoji, tileId, x, y] = savedEmoji
+
+              if (
+                typeof id !== 'string' ||
+                typeof emoji !== 'string' ||
+                typeof tileId !== 'string' ||
+                !Number.isFinite(x) ||
+                !Number.isFinite(y)
+              ) {
+                return null
+              }
+
+              return {
+                id,
+                emoji,
+                tileId,
+                x: clampPercent(x),
+                y: clampPercent(y),
+              }
+            })
+            .filter((emojiMarker): emojiMarker is EmojiMarker => {
+              if (!emojiMarker) {
+                return false
+              }
+
+              return tiles.some((tile) => tile.id === emojiMarker.tileId)
+            })
+        : []
+
+    return { size, tiles, marker, emojiMarkers }
   } catch {
     return null
   }
@@ -244,6 +330,7 @@ function getInitialDungeon() {
     size,
     tiles: buildTiles(size, Date.now()),
     marker: null,
+    emojiMarkers: [],
   }
 }
 
@@ -267,6 +354,9 @@ function App() {
   const [marker, setMarker] = useState<Marker | null>(
     () => initialDungeon.marker,
   )
+  const [emojiMarkers, setEmojiMarkers] = useState<EmojiMarker[]>(
+    () => initialDungeon.emojiMarkers,
+  )
   const [dragPosition, setDragPosition] = useState<DragPosition | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [zoom, setZoom] = useState(1)
@@ -283,23 +373,29 @@ function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    params.set('d', encodeDungeon(size, tiles, marker))
+    params.set('d', encodeDungeon(size, tiles, marker, emojiMarkers))
 
     const nextUrl = `${window.location.pathname}?${params.toString()}${window.location.hash}`
     window.history.replaceState(null, '', nextUrl)
-  }, [marker, size, tiles])
+  }, [emojiMarkers, marker, size, tiles])
 
   useEffect(() => {
     if (!dragPosition) {
       return
     }
 
+    const activeDrag = dragPosition
+
     function handlePointerMove(event: globalThis.PointerEvent) {
       if (!isDraggingMarker.current) {
         return
       }
 
-      setDragPosition({ x: event.clientX, y: event.clientY })
+      setDragPosition({
+        ...activeDrag,
+        x: event.clientX,
+        y: event.clientY,
+      })
     }
 
     function handlePointerUp(event: globalThis.PointerEvent) {
@@ -309,6 +405,9 @@ function App() {
 
       isDraggingMarker.current = false
       setDragPosition(null)
+      window.setTimeout(() => {
+        suppressTileClick.current = false
+      }, 250)
 
       const tileButton = document
         .elementFromPoint(event.clientX, event.clientY)
@@ -317,7 +416,18 @@ function App() {
       const tile = tiles.find((currentTile) => currentTile.id === tileId)
 
       if (!tileButton || !tileId || !tile) {
-        setMarker(null)
+        if (activeDrag.kind === 'party') {
+          setMarker(null)
+        }
+
+        if (activeDrag.kind === 'emoji-existing') {
+          setEmojiMarkers((currentEmojiMarkers) =>
+            currentEmojiMarkers.filter(
+              (emojiMarker) => emojiMarker.id !== activeDrag.id,
+            ),
+          )
+        }
+
         return
       }
 
@@ -326,11 +436,41 @@ function App() {
       const displayY = clampPercent((event.clientY - rect.top) / rect.height)
       const localPoint = rotatePoint(displayX, displayY, -tile.rotation)
 
-      setMarker({
-        tileId,
-        x: localPoint.x,
-        y: localPoint.y,
-      })
+      if (activeDrag.kind === 'party') {
+        setMarker({
+          tileId,
+          x: localPoint.x,
+          y: localPoint.y,
+        })
+      }
+
+      if (activeDrag.kind === 'emoji-source') {
+        setEmojiMarkers((currentEmojiMarkers) => [
+          ...currentEmojiMarkers,
+          {
+            id: `${tileId}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+            emoji: activeDrag.emoji,
+            tileId,
+            x: localPoint.x,
+            y: localPoint.y,
+          },
+        ])
+      }
+
+      if (activeDrag.kind === 'emoji-existing') {
+        setEmojiMarkers((currentEmojiMarkers) =>
+          currentEmojiMarkers.map((emojiMarker) =>
+            emojiMarker.id === activeDrag.id
+              ? {
+                  ...emojiMarker,
+                  tileId,
+                  x: localPoint.x,
+                  y: localPoint.y,
+                }
+              : emojiMarker,
+          ),
+        )
+      }
     }
 
     window.addEventListener('pointermove', handlePointerMove)
@@ -353,6 +493,7 @@ function App() {
     setSize(nextSize)
     setTiles(buildTiles(nextSize, Date.now()))
     setMarker(null)
+    setEmojiMarkers([])
     setPan({ x: 0, y: 0 })
   }
 
@@ -360,6 +501,7 @@ function App() {
     withTransition(() => {
       setTiles(buildTiles(size, Date.now()))
       setMarker(null)
+      setEmojiMarkers([])
       setPan({ x: 0, y: 0 })
     })
   }
@@ -383,7 +525,45 @@ function App() {
     event.preventDefault()
     event.stopPropagation()
     isDraggingMarker.current = true
-    setDragPosition({ x: event.clientX, y: event.clientY })
+    suppressTileClick.current = true
+    setDragPosition({ kind: 'party', x: event.clientX, y: event.clientY })
+  }
+
+  function startEmojiSourceDrag(event: PointerEvent, emoji: string) {
+    event.preventDefault()
+    event.stopPropagation()
+    isDraggingMarker.current = true
+    suppressTileClick.current = true
+    setDragPosition({
+      kind: 'emoji-source',
+      emoji,
+      x: event.clientX,
+      y: event.clientY,
+    })
+  }
+
+  function startEmojiMarkerDrag(event: PointerEvent, emojiMarker: EmojiMarker) {
+    event.preventDefault()
+    event.stopPropagation()
+    isDraggingMarker.current = true
+    suppressTileClick.current = true
+    setDragPosition({
+      kind: 'emoji-existing',
+      id: emojiMarker.id,
+      emoji: emojiMarker.emoji,
+      x: event.clientX,
+      y: event.clientY,
+    })
+  }
+
+  function removeEmojiMarker(id: string) {
+    setEmojiMarkers((currentEmojiMarkers) =>
+      currentEmojiMarkers.filter((emojiMarker) => emojiMarker.id !== id),
+    )
+  }
+
+  function removePartyMarker() {
+    setMarker(null)
   }
 
   function updateZoom(nextZoom: number) {
@@ -425,7 +605,7 @@ function App() {
 
     if (
       target.closest(
-        '.shift-button, .marker-source, .marker-on-tile, .site-footer',
+        '.shift-button, .marker-source, .marker-on-tile, .emoji-source, .emoji-marker, .site-footer',
       )
     ) {
       return
@@ -469,6 +649,9 @@ function App() {
 
     panStart.current = null
     setIsPanning(false)
+    window.setTimeout(() => {
+      suppressTileClick.current = false
+    }, 250)
   }
 
   function shiftRow(row: number, direction: -1 | 1) {
@@ -566,6 +749,18 @@ function App() {
           context.stroke()
         }
 
+        emojiMarkers
+          .filter((emojiMarker) => emojiMarker.tileId === tile.id)
+          .forEach((emojiMarker) => {
+            const emojiX = emojiMarker.x * EXPORT_TILE_SIZE - EXPORT_TILE_SIZE / 2
+            const emojiY = emojiMarker.y * EXPORT_TILE_SIZE - EXPORT_TILE_SIZE / 2
+
+            context.font = `${Math.floor(EXPORT_TILE_SIZE * 0.09)}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`
+            context.textAlign = 'center'
+            context.textBaseline = 'middle'
+            context.fillText(emojiMarker.emoji, emojiX, emojiY)
+          })
+
         context.restore()
       })
 
@@ -635,6 +830,23 @@ function App() {
             <span className="marker-dot" aria-hidden="true"></span>
           </button>
           <span>Drag the party onto the map.</span>
+        </div>
+
+        <div className="emoji-panel">
+          <span>Drag emoji markers onto the map.</span>
+          <div className="emoji-palette" aria-label="Emoji marker palette">
+            {EMOJI_OPTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className="emoji-source"
+                aria-label={`Drag ${emoji} marker onto the map`}
+                onPointerDown={(event) => startEmojiSourceDrag(event, emoji)}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="zoom-controls" aria-label="Map zoom">
@@ -744,19 +956,54 @@ function App() {
                   style={{ transform: `rotate(${tile.rotation}deg)` }}
                 >
                   <img className="tile" src={tile.src} alt="" />
-                  {marker?.tileId === tile.id && !dragPosition ? (
-                    <span
-                      className="marker-dot marker-on-tile"
-                      aria-hidden="true"
-                      onPointerDown={startMarkerDrag}
-                      onClick={(event) => event.stopPropagation()}
-                      style={{
-                        left: `${marker.x * 100}%`,
-                        top: `${marker.y * 100}%`,
-                      }}
-                    ></span>
-                  ) : null}
                 </span>
+                {marker?.tileId === tile.id &&
+                dragPosition?.kind !== 'party' ? (
+                  <span
+                    className="marker-dot marker-on-tile"
+                    aria-hidden="true"
+                    onPointerDown={startMarkerDrag}
+                    onClick={(event) => event.stopPropagation()}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      removePartyMarker()
+                    }}
+                    style={{
+                      left: `${markerDisplayPoint(marker, tile).x * 100}%`,
+                      top: `${markerDisplayPoint(marker, tile).y * 100}%`,
+                    }}
+                  ></span>
+                ) : null}
+                {emojiMarkers
+                  .filter((emojiMarker) => emojiMarker.tileId === tile.id)
+                  .map((emojiMarker) => {
+                    const displayPoint = markerDisplayPoint(emojiMarker, tile)
+
+                    return dragPosition?.kind === 'emoji-existing' &&
+                      dragPosition.id === emojiMarker.id ? null : (
+                      <span
+                        key={emojiMarker.id}
+                        className="emoji-marker"
+                        aria-hidden="true"
+                        onPointerDown={(event) =>
+                          startEmojiMarkerDrag(event, emojiMarker)
+                        }
+                        onClick={(event) => event.stopPropagation()}
+                        onContextMenu={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          removeEmojiMarker(emojiMarker.id)
+                        }}
+                        style={{
+                          left: `${displayPoint.x * 100}%`,
+                          top: `${displayPoint.y * 100}%`,
+                        }}
+                      >
+                        {emojiMarker.emoji}
+                      </span>
+                    )
+                  })}
               </button>
             ))}
           </div>
@@ -794,14 +1041,27 @@ function App() {
       </section>
 
       {dragPosition ? (
-        <span
-          className="marker-dot marker-floating"
-          aria-hidden="true"
-          style={{
-            left: dragPosition.x,
-            top: dragPosition.y,
-          }}
-        ></span>
+        dragPosition.kind === 'party' ? (
+          <span
+            className="marker-dot marker-floating"
+            aria-hidden="true"
+            style={{
+              left: dragPosition.x,
+              top: dragPosition.y,
+            }}
+          ></span>
+        ) : (
+          <span
+            className="emoji-marker emoji-floating"
+            aria-hidden="true"
+            style={{
+              left: dragPosition.x,
+              top: dragPosition.y,
+            }}
+          >
+            {dragPosition.emoji}
+          </span>
+        )
       ) : null}
 
       <footer className="site-footer">
