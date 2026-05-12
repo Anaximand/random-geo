@@ -1,4 +1,5 @@
 .app-shell {
+  position: relative;
   min-height: 100svh;
   display: grid;
   grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
@@ -292,6 +293,32 @@
   pointer-events: none;
 }
 
+.site-footer {
+  position: fixed;
+  right: 14px;
+  bottom: 10px;
+  z-index: 5;
+  max-width: min(520px, calc(100vw - 28px));
+  padding: 7px 10px;
+  border: 1px solid rgba(54, 73, 71, 0.14);
+  border-radius: 7px;
+  color: var(--muted);
+  background: rgba(255, 253, 250, 0.9);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  box-shadow: 0 8px 18px rgba(35, 41, 38, 0.08);
+}
+
+.site-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  text-decoration: underline;
+}
+
 ::view-transition-group(*) {
   animation-duration: 170ms;
   animation-timing-function: ease;
@@ -312,7 +339,7 @@
 
   .composition-stage {
     min-height: auto;
-    padding: 24px 16px 34px;
+    padding: 24px 16px 56px;
   }
 
   .board-controls {
@@ -333,6 +360,14 @@
 
   .shift-button span {
     font-size: 18px;
+  }
+
+  .site-footer {
+    left: 10px;
+    right: 10px;
+    bottom: 8px;
+    max-width: none;
+    text-align: center;
   }
 }
 

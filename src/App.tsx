@@ -14,7 +14,9 @@ const centerModules = import.meta.glob('./assets/10x10/*.png', {
   import: 'default',
 })
 
-const centers = Object.values(centerModules) as string[]
+const centers = Object.entries(centerModules)
+  .sort(([firstPath], [secondPath]) => firstPath.localeCompare(secondPath))
+  .map(([, src]) => src as string)
 
 type Tile = {
   id: string
@@ -388,7 +390,7 @@ function App() {
   return (
     <main className="app-shell">
       <section className="control-panel" aria-labelledby="app-title">
-        <h1 id="app-title">Random Geomorph Dungeon</h1>
+        <h1 id="app-title">Dynamic Geomorph Dungeon</h1>
 
         <div className="size-controls" aria-label="Composition size">
           <label>
@@ -555,6 +557,14 @@ function App() {
           }}
         ></span>
       ) : null}
+
+      <footer className="site-footer">
+        Geomorph images by SoaringMoon, taken from{' '}
+        <a href="https://soaringmoon.itch.io/infinite-floorplanner">
+          Infinite Floorplanner
+        </a>
+        .
+      </footer>
     </main>
   )
 }
