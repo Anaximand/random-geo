@@ -1,8 +1,9 @@
 .app-shell {
   position: relative;
-  min-height: 100svh;
+  height: 100svh;
   display: grid;
   grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+  overflow: hidden;
   background:
     linear-gradient(90deg, rgba(30, 58, 90, 0.06) 1px, transparent 1px),
     linear-gradient(rgba(30, 58, 90, 0.06) 1px, transparent 1px),
@@ -128,28 +129,85 @@
   cursor: grabbing;
 }
 
-.composition-stage {
-  min-width: 0;
-  min-height: 100svh;
+.zoom-controls {
+  display: grid;
+  grid-template-columns: 42px 1fr 42px;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.zoom-controls button {
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
+  border: 1px solid rgba(54, 73, 71, 0.18);
+  border-radius: 7px;
+  color: var(--text-h);
+  background: rgba(248, 247, 242, 0.9);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoom-controls button:hover {
+  border-color: rgba(182, 83, 55, 0.45);
+  background: #fff;
+}
+
+.zoom-controls label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.zoom-controls input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.composition-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100svh;
   padding: 36px;
   box-sizing: border-box;
-  overflow: auto;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.composition-stage.is-panning {
+  cursor: grabbing;
 }
 
 .board-controls {
-  --unit: min(
-    calc((100vw - 520px) / var(--map-width) / 10),
-    calc((100svh - 72px) / var(--map-height) / 10),
-    14px
-  );
+  --base-unit: 10px;
+  --unit: calc(var(--base-unit) * var(--zoom));
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: grid;
   grid-template-columns: 38px auto 38px;
   grid-template-rows: 38px auto 38px;
   gap: 10px;
   align-items: center;
   justify-items: center;
+  transform: translate(
+    calc(-50% + var(--pan-x)),
+    calc(-50% + var(--pan-y))
+  );
+  transform-origin: center;
 }
 
 .column-controls {
@@ -344,6 +402,7 @@
 @media (max-width: 880px) {
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .control-panel {
@@ -355,16 +414,14 @@
   }
 
   .composition-stage {
-    min-height: auto;
+    height: 100%;
+    min-height: 0;
     padding: 24px 16px 56px;
   }
 
   .board-controls {
-    --unit: min(
-      calc((100vw - 62px) / var(--map-width) / 10),
-      calc((100svh - 300px) / var(--map-height) / 10),
-      11px
-    );
+    --base-unit: 8px;
+    --unit: calc(var(--base-unit) * var(--zoom));
     grid-template-columns: 32px auto 32px;
     grid-template-rows: 32px auto 32px;
     gap: 7px;

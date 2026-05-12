@@ -4,6 +4,7 @@ import {
   useState,
   type CSSProperties,
   type PointerEvent,
+  type WheelEvent,
 } from 'react'
 import { flushSync } from 'react-dom'
 import './App.css'
@@ -41,6 +42,14 @@ type DragPosition = {
   y: number
 }
 
+type PanStart = {
+  pointerId: number
+  clientX: number
+  clientY: number
+  panX: number
+  panY: number
+}
+
 type ViewTransitionDocument = Document & {
   startViewTransition?: (callback: () => void) => unknown
 }
@@ -56,6 +65,9 @@ type SavedDungeon = {
 const MIN_SIZE = 1
 const MAX_SIZE = 12
 const EXPORT_TILE_SIZE = 512
+const MIN_ZOOM = 0.5
+const MAX_ZOOM = 4
+const ZOOM_STEP = 0.1
 
 function createRandom(seed: number) {
   let value = seed || 1
@@ -257,7 +269,17 @@ function App() {
   )
   const [dragPosition, setDragPosition] = useState<DragPosition | null>(null)
   const [isExporting, setIsExporting] = useState(false)
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
   const isDraggingMarker = useRef(false)
+  const panStart = useRef<PanStart | null>(null)
+  const suppressTileClick = useRef(false)
+  const zoomRef = useRef(zoom)
+
+  useEffect(() => {
+    zoomRef.current = zoom
+  }, [zoom])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -331,16 +353,23 @@ function App() {
     setSize(nextSize)
     setTiles(buildTiles(nextSize, Date.now()))
     setMarker(null)
+    setPan({ x: 0, y: 0 })
   }
 
   function regenerate() {
     withTransition(() => {
       setTiles(buildTiles(size, Date.now()))
       setMarker(null)
+      setPan({ x: 0, y: 0 })
     })
   }
 
   function rotateTile(tileId: string) {
+    if (suppressTileClick.current) {
+      suppressTileClick.current = false
+      return
+    }
+
     setTiles((currentTiles) =>
       currentTiles.map((tile) =>
         tile.id === tileId
@@ -355,6 +384,91 @@ function App() {
     event.stopPropagation()
     isDraggingMarker.current = true
     setDragPosition({ x: event.clientX, y: event.clientY })
+  }
+
+  function updateZoom(nextZoom: number) {
+    setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom)))
+  }
+
+  function zoomAtCursor(event: WheelEvent<HTMLElement>) {
+    event.preventDefault()
+
+    const currentZoom = zoomRef.current
+    const nextZoom = Math.min(
+      MAX_ZOOM,
+      Math.max(MIN_ZOOM, currentZoom * Math.exp(-event.deltaY * 0.001)),
+    )
+
+    if (nextZoom === currentZoom) {
+      return
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const cursorX = event.clientX - (rect.left + rect.width / 2)
+    const cursorY = event.clientY - (rect.top + rect.height / 2)
+    const zoomRatio = nextZoom / currentZoom
+
+    setPan((currentPan) => ({
+      x: cursorX - (cursorX - currentPan.x) * zoomRatio,
+      y: cursorY - (cursorY - currentPan.y) * zoomRatio,
+    }))
+    setZoom(nextZoom)
+    zoomRef.current = nextZoom
+  }
+
+  function startPan(event: PointerEvent<HTMLElement>) {
+    if (event.button !== 0 || isDraggingMarker.current) {
+      return
+    }
+
+    const target = event.target as HTMLElement
+
+    if (
+      target.closest(
+        '.shift-button, .marker-source, .marker-on-tile, .site-footer',
+      )
+    ) {
+      return
+    }
+
+    panStart.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    }
+    suppressTileClick.current = false
+    setIsPanning(true)
+  }
+
+  function movePan(event: PointerEvent<HTMLElement>) {
+    const currentPanStart = panStart.current
+
+    if (!currentPanStart || currentPanStart.pointerId !== event.pointerId) {
+      return
+    }
+
+    const movementX = event.clientX - currentPanStart.clientX
+    const movementY = event.clientY - currentPanStart.clientY
+
+    if (Math.hypot(movementX, movementY) > 4) {
+      suppressTileClick.current = true
+    }
+
+    setPan({
+      x: currentPanStart.panX + movementX,
+      y: currentPanStart.panY + movementY,
+    })
+  }
+
+  function stopPan(event: PointerEvent<HTMLElement>) {
+    if (panStart.current?.pointerId !== event.pointerId) {
+      return
+    }
+
+    panStart.current = null
+    setIsPanning(false)
   }
 
   function shiftRow(row: number, direction: -1 | 1) {
@@ -522,15 +636,54 @@ function App() {
           </button>
           <span>Drag the party onto the map.</span>
         </div>
+
+        <div className="zoom-controls" aria-label="Map zoom">
+          <button
+            type="button"
+            aria-label="Zoom out"
+            onClick={() => updateZoom(zoom - ZOOM_STEP)}
+          >
+            -
+          </button>
+          <label>
+            <span>Zoom</span>
+            <input
+              type="range"
+              min={MIN_ZOOM}
+              max={MAX_ZOOM}
+              step="0.05"
+              value={zoom}
+              onChange={(event) => updateZoom(Number(event.target.value))}
+            />
+          </label>
+          <button
+            type="button"
+            aria-label="Zoom in"
+            onClick={() => updateZoom(zoom + ZOOM_STEP)}
+          >
+            +
+          </button>
+        </div>
       </section>
 
-      <section className="composition-stage" aria-label="Generated geomorph map">
+      <section
+        className={`composition-stage ${isPanning ? 'is-panning' : ''}`}
+        aria-label="Generated geomorph map"
+        onPointerDown={startPan}
+        onPointerMove={movePan}
+        onPointerUp={stopPan}
+        onPointerCancel={stopPan}
+        onWheel={zoomAtCursor}
+      >
         <div
           className="board-controls"
           style={
             {
               '--map-width': size.width,
               '--map-height': size.height,
+              '--zoom': zoom,
+              '--pan-x': `${pan.x}px`,
+              '--pan-y': `${pan.y}px`,
             } as CSSProperties
           }
         >

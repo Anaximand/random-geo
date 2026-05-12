@@ -28,6 +28,12 @@
 body {
   min-width: 320px;
   margin: 0;
+  overflow: hidden;
+}
+
+#root {
+  height: 100svh;
+  overflow: hidden;
 }
 
 button,
